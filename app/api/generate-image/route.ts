@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { VertexAI } from '@google-cloud/vertexai';
 import { buildImagePrompt } from '@/lib/ai/prompts';
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
+// Get credentials from environment
+function getCredentials() {
+  const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
+  if (!credentialsJson) {
+    return null;
+  }
+  try {
+    return JSON.parse(credentialsJson);
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,49 +36,44 @@ export async function POST(request: NextRequest) {
       previousPrompt,
     });
 
-    // Check if API key is available
-    if (!process.env.GOOGLE_AI_API_KEY) {
-      console.warn('GOOGLE_AI_API_KEY not configured, returning placeholder');
+    const credentials = getCredentials();
+
+    if (!credentials) {
+      console.warn('GOOGLE_CLOUD_CREDENTIALS not configured, returning placeholder');
       return NextResponse.json({
         imageUrl: `https://placehold.co/1080x1080/369AC4/FFFFFF?text=${encodeURIComponent(contentType)}`,
         prompt,
-        message: 'Using placeholder - configure GOOGLE_AI_API_KEY for real generation',
+        message: 'Using placeholder - configure GOOGLE_CLOUD_CREDENTIALS for real generation',
       });
     }
 
-    // Use Gemini for image generation
-    // Note: Gemini 2.0 Flash supports image generation
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: prompt + '\n\nGenerate an image based on these specifications.',
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        // Request image generation
-        responseMimeType: 'text/plain',
+    // Initialize Vertex AI
+    const vertexAI = new VertexAI({
+      project: credentials.project_id,
+      location: 'us-central1',
+      googleAuthOptions: {
+        credentials: credentials,
       },
     });
 
-    const response = result.response;
-    const text = response.text();
+    // Use Imagen 3 for image generation
+    const generativeModel = vertexAI.getGenerativeModel({
+      model: 'imagen-3.0-generate-001',
+    });
 
-    // Check if we got an image in the response
-    // Gemini returns images as inline data in certain models
-    const candidates = response.candidates;
+    // Generate image
+    const result = await generativeModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    });
+
+    const response = result.response;
+
+    // Check for generated images in the response
     let imageUrl = null;
 
-    if (candidates && candidates[0]?.content?.parts) {
-      for (const part of candidates[0].content.parts) {
+    if (response.candidates && response.candidates[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
         if ('inlineData' in part && part.inlineData) {
-          // Convert base64 image to data URL
           const { mimeType, data } = part.inlineData;
           imageUrl = `data:${mimeType};base64,${data}`;
           break;
@@ -76,24 +81,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // If no image was generated, use a placeholder
     if (!imageUrl) {
+      // Fallback to placeholder if no image generated
       imageUrl = `https://placehold.co/1080x1080/369AC4/FFFFFF?text=${encodeURIComponent(contentType)}`;
     }
 
     return NextResponse.json({
       imageUrl,
       prompt,
-      description: text,
     });
   } catch (error) {
     console.error('Image generation error:', error);
 
-    // Return placeholder on error
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
     return NextResponse.json({
-      imageUrl: 'https://placehold.co/1080x1080/369AC4/FFFFFF?text=Content+Preview',
+      imageUrl: 'https://placehold.co/1080x1080/369AC4/FFFFFF?text=Generation+Error',
       prompt: 'Error generating image',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
   }
 }
