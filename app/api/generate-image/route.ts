@@ -1,19 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { VertexAI } from '@google-cloud/vertexai';
+import Replicate from 'replicate';
 import { buildImagePrompt } from '@/lib/ai/prompts';
-
-// Get credentials from environment
-function getCredentials() {
-  const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
-  if (!credentialsJson) {
-    return null;
-  }
-  try {
-    return JSON.parse(credentialsJson);
-  } catch {
-    return null;
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,54 +23,39 @@ export async function POST(request: NextRequest) {
       previousPrompt,
     });
 
-    const credentials = getCredentials();
-
-    if (!credentials) {
-      console.warn('GOOGLE_CLOUD_CREDENTIALS not configured, returning placeholder');
+    if (!process.env.REPLICATE_API_TOKEN) {
+      console.warn('REPLICATE_API_TOKEN not configured, returning placeholder');
       return NextResponse.json({
         imageUrl: `https://placehold.co/1080x1080/369AC4/FFFFFF?text=${encodeURIComponent(contentType)}`,
         prompt,
-        message: 'Using placeholder - configure GOOGLE_CLOUD_CREDENTIALS for real generation',
+        message: 'Using placeholder - configure REPLICATE_API_TOKEN for real generation',
       });
     }
 
-    // Initialize Vertex AI
-    const vertexAI = new VertexAI({
-      project: credentials.project_id,
-      location: 'us-central1',
-      googleAuthOptions: {
-        credentials: credentials,
-      },
+    const replicate = new Replicate({
+      auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // Use Imagen 3 for image generation
-    const generativeModel = vertexAI.getGenerativeModel({
-      model: 'imagen-3.0-generate-001',
-    });
-
-    // Generate image
-    const result = await generativeModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    });
-
-    const response = result.response;
-
-    // Check for generated images in the response
-    let imageUrl = null;
-
-    if (response.candidates && response.candidates[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if ('inlineData' in part && part.inlineData) {
-          const { mimeType, data } = part.inlineData;
-          imageUrl = `data:${mimeType};base64,${data}`;
-          break;
-        }
+    // Use Flux Pro for high quality image generation
+    const output = await replicate.run(
+      'black-forest-labs/flux-1.1-pro',
+      {
+        input: {
+          prompt: prompt,
+          aspect_ratio: '1:1',
+          output_format: 'png',
+          output_quality: 90,
+          safety_tolerance: 2,
+          prompt_upsampling: true,
+        },
       }
-    }
+    );
+
+    // Flux returns a URL string directly
+    const imageUrl = typeof output === 'string' ? output : (output as string[])[0];
 
     if (!imageUrl) {
-      // Fallback to placeholder if no image generated
-      imageUrl = `https://placehold.co/1080x1080/369AC4/FFFFFF?text=${encodeURIComponent(contentType)}`;
+      throw new Error('No image URL returned from Replicate');
     }
 
     return NextResponse.json({
