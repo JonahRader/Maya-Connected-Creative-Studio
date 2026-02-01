@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Redirect API routes (handled automatically by the plugin)
+# Environment variables should be set in Netlify UI for security:
+# - GOOGLE_AI_API_KEY
+# - ANTHROPIC_API_KEY
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+:root {
+  /* Connected Brand Colors */
+  --brand-blue: #369AC4;
+  --brand-purple: #26034C;
+  --brand-light-gray: #E6E6E6;
+  --brand-light-blue: #9DB4D8;
+  --brand-gray: #6E6E6E;
+  --brand-dark-navy: #061835;
+
+  /* App Colors */
+  --background: #f9fafb;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Brand Colors */
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-purple: var(--brand-purple);
+  --color-brand-light-gray: var(--brand-light-gray);
+  --color-brand-light-blue: var(--brand-light-blue);
+  --color-brand-gray: var(--brand-gray);
+  --color-brand-dark-navy: var(--brand-dark-navy);
+
+  /* Fonts */
+  --font-sans: 'Raleway', system-ui, sans-serif;
+}
+
+/* Brand Gradient Utility */
+.bg-brand-gradient {
+  background: linear-gradient(90deg, #26034C 0%, #369AC4 100%);
+}
+
+.bg-brand-gradient-vertical {
+  background: linear-gradient(180deg, #26034C 0%, #369AC4 100%);
+}
+
+.text-brand-gradient {
+  background: linear-gradient(90deg, #26034C 0%, #369AC4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Raleway', system-ui, sans-serif;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
