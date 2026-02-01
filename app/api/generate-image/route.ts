@@ -36,26 +36,38 @@ export async function POST(request: NextRequest) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // Use Flux Pro for high quality image generation
+    // Use Flux Schnell (faster, included in free tier for testing)
     const output = await replicate.run(
-      'black-forest-labs/flux-1.1-pro',
+      'black-forest-labs/flux-schnell',
       {
         input: {
           prompt: prompt,
           aspect_ratio: '1:1',
           output_format: 'png',
-          output_quality: 90,
-          safety_tolerance: 2,
-          prompt_upsampling: true,
+          num_outputs: 1,
         },
       }
     );
 
-    // Flux returns a URL string directly
-    const imageUrl = typeof output === 'string' ? output : (output as string[])[0];
+    console.log('Replicate output:', JSON.stringify(output));
+
+    // Handle different response formats
+    let imageUrl: string | null = null;
+
+    if (typeof output === 'string') {
+      imageUrl = output;
+    } else if (Array.isArray(output) && output.length > 0) {
+      imageUrl = output[0];
+    } else if (output && typeof output === 'object') {
+      // Check for common response structures
+      const obj = output as Record<string, unknown>;
+      if (obj.url) imageUrl = obj.url as string;
+      else if (obj.output) imageUrl = Array.isArray(obj.output) ? obj.output[0] : obj.output as string;
+    }
 
     if (!imageUrl) {
-      throw new Error('No image URL returned from Replicate');
+      console.error('Unexpected output format:', output);
+      throw new Error('Could not extract image URL from Replicate response');
     }
 
     return NextResponse.json({
