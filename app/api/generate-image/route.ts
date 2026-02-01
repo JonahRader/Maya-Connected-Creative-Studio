@@ -36,42 +36,46 @@ export async function POST(request: NextRequest) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // Create prediction and wait for it
-    let prediction = await replicate.predictions.create({
-      model: 'black-forest-labs/flux-schnell',
-      input: {
-        prompt: prompt,
-        aspect_ratio: '1:1',
-        output_format: 'webp',
-        num_outputs: 1,
-      },
-    });
+    // Use replicate.run which handles waiting automatically
+    const output = await replicate.run(
+      'black-forest-labs/flux-schnell',
+      {
+        input: {
+          prompt: prompt,
+          aspect_ratio: '1:1',
+          output_format: 'webp',
+          num_outputs: 1,
+          go_fast: true,
+        },
+      }
+    );
 
-    console.log('Prediction created:', prediction.id, prediction.status);
+    console.log('Replicate output type:', typeof output);
+    console.log('Replicate output:', JSON.stringify(output));
 
-    // Wait for the prediction to complete
-    prediction = await replicate.predictions.wait(prediction);
-
-    console.log('Prediction completed:', prediction.status, JSON.stringify(prediction.output));
-
-    if (prediction.status === 'failed') {
-      throw new Error(prediction.error || 'Prediction failed');
-    }
-
-    // Get the output URL
+    // Get the output URL - Flux returns an array of FileOutput objects
     let imageUrl: string | null = null;
-    const output = prediction.output;
 
-    if (typeof output === 'string') {
+    if (Array.isArray(output) && output.length > 0) {
+      const first = output[0];
+      // FileOutput has a url() method or might be a string
+      if (typeof first === 'string') {
+        imageUrl = first;
+      } else if (first && typeof first === 'object') {
+        // Check if it has a url property or is a URL-like object
+        if ('url' in first) {
+          imageUrl = String(first.url);
+        } else if (first.toString && first.toString() !== '[object Object]') {
+          imageUrl = first.toString();
+        }
+      }
+    } else if (typeof output === 'string') {
       imageUrl = output;
-    } else if (Array.isArray(output) && output.length > 0) {
-      // Flux returns array of URLs
-      imageUrl = typeof output[0] === 'string' ? output[0] : null;
     }
 
     if (!imageUrl) {
-      console.error('No valid URL in output:', output);
-      throw new Error('No image URL in prediction output');
+      console.error('Could not extract URL from output:', output);
+      throw new Error('No image URL in output');
     }
 
     return NextResponse.json({
