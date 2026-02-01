@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Replicate from 'replicate';
 import { buildImagePrompt } from '@/lib/ai/prompts';
+
+const REPLICATE_API_URL = 'https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +15,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build the prompt
     const prompt = buildImagePrompt({
       contentType,
       aesthetic,
@@ -23,74 +23,95 @@ export async function POST(request: NextRequest) {
       previousPrompt,
     });
 
-    if (!process.env.REPLICATE_API_TOKEN) {
-      console.warn('REPLICATE_API_TOKEN not configured, returning placeholder');
+    const apiToken = process.env.REPLICATE_API_TOKEN;
+
+    if (!apiToken) {
       return NextResponse.json({
         imageUrl: `https://placehold.co/1080x1080/369AC4/FFFFFF?text=${encodeURIComponent(contentType)}`,
         prompt,
-        message: 'Using placeholder - configure REPLICATE_API_TOKEN for real generation',
+        message: 'Using placeholder - configure REPLICATE_API_TOKEN',
       });
     }
 
-    const replicate = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN,
-    });
-
-    // Use replicate.run which handles waiting automatically
-    const output = await replicate.run(
-      'black-forest-labs/flux-schnell',
-      {
+    // Create prediction
+    const createResponse = await fetch(REPLICATE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait',
+      },
+      body: JSON.stringify({
         input: {
           prompt: prompt,
           aspect_ratio: '1:1',
           output_format: 'webp',
           num_outputs: 1,
-          go_fast: true,
         },
+      }),
+    });
+
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      console.error('Replicate API error:', createResponse.status, errorText);
+      throw new Error(`Replicate API error: ${createResponse.status}`);
+    }
+
+    const prediction = await createResponse.json();
+    console.log('Prediction response:', JSON.stringify(prediction));
+
+    // If using Prefer: wait, the prediction should be complete
+    // Otherwise we'd need to poll
+    let output = prediction.output;
+
+    // If not complete, poll for result
+    if (prediction.status !== 'succeeded' && prediction.urls?.get) {
+      let attempts = 0;
+      const maxAttempts = 30;
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const pollResponse = await fetch(prediction.urls.get, {
+          headers: { 'Authorization': `Bearer ${apiToken}` },
+        });
+
+        const pollResult = await pollResponse.json();
+        console.log('Poll result:', pollResult.status);
+
+        if (pollResult.status === 'succeeded') {
+          output = pollResult.output;
+          break;
+        } else if (pollResult.status === 'failed') {
+          throw new Error(pollResult.error || 'Generation failed');
+        }
+
+        attempts++;
       }
-    );
+    }
 
-    console.log('Replicate output type:', typeof output);
-    console.log('Replicate output:', JSON.stringify(output));
+    console.log('Final output:', JSON.stringify(output));
 
-    // Get the output URL - Flux returns an array of FileOutput objects
+    // Extract URL from output
     let imageUrl: string | null = null;
 
     if (Array.isArray(output) && output.length > 0) {
-      const first = output[0];
-      // FileOutput has a url() method or might be a string
-      if (typeof first === 'string') {
-        imageUrl = first;
-      } else if (first && typeof first === 'object') {
-        // Check if it has a url property or is a URL-like object
-        if ('url' in first) {
-          imageUrl = String(first.url);
-        } else if (first.toString && first.toString() !== '[object Object]') {
-          imageUrl = first.toString();
-        }
-      }
+      imageUrl = output[0];
     } else if (typeof output === 'string') {
       imageUrl = output;
     }
 
     if (!imageUrl) {
-      console.error('Could not extract URL from output:', output);
       throw new Error('No image URL in output');
     }
 
-    return NextResponse.json({
-      imageUrl,
-      prompt,
-    });
+    return NextResponse.json({ imageUrl, prompt });
   } catch (error) {
     console.error('Image generation error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
     return NextResponse.json({
-      imageUrl: 'https://placehold.co/1080x1080/369AC4/FFFFFF?text=Generation+Error',
-      prompt: 'Error generating image',
-      error: errorMessage,
+      imageUrl: 'https://placehold.co/1080x1080/369AC4/FFFFFF?text=Error',
+      prompt: 'Error',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 }
