@@ -36,38 +36,42 @@ export async function POST(request: NextRequest) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // Use Flux Schnell (faster, included in free tier for testing)
-    const output = await replicate.run(
-      'black-forest-labs/flux-schnell',
-      {
-        input: {
-          prompt: prompt,
-          aspect_ratio: '1:1',
-          output_format: 'png',
-          num_outputs: 1,
-        },
-      }
-    );
+    // Create prediction and wait for it
+    let prediction = await replicate.predictions.create({
+      model: 'black-forest-labs/flux-schnell',
+      input: {
+        prompt: prompt,
+        aspect_ratio: '1:1',
+        output_format: 'webp',
+        num_outputs: 1,
+      },
+    });
 
-    console.log('Replicate output:', JSON.stringify(output));
+    console.log('Prediction created:', prediction.id, prediction.status);
 
-    // Handle different response formats
+    // Wait for the prediction to complete
+    prediction = await replicate.predictions.wait(prediction);
+
+    console.log('Prediction completed:', prediction.status, JSON.stringify(prediction.output));
+
+    if (prediction.status === 'failed') {
+      throw new Error(prediction.error || 'Prediction failed');
+    }
+
+    // Get the output URL
     let imageUrl: string | null = null;
+    const output = prediction.output;
 
     if (typeof output === 'string') {
       imageUrl = output;
     } else if (Array.isArray(output) && output.length > 0) {
-      imageUrl = output[0];
-    } else if (output && typeof output === 'object') {
-      // Check for common response structures
-      const obj = output as Record<string, unknown>;
-      if (obj.url) imageUrl = obj.url as string;
-      else if (obj.output) imageUrl = Array.isArray(obj.output) ? obj.output[0] : obj.output as string;
+      // Flux returns array of URLs
+      imageUrl = typeof output[0] === 'string' ? output[0] : null;
     }
 
     if (!imageUrl) {
-      console.error('Unexpected output format:', output);
-      throw new Error('Could not extract image URL from Replicate response');
+      console.error('No valid URL in output:', output);
+      throw new Error('No image URL in prediction output');
     }
 
     return NextResponse.json({
